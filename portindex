@@ -3,7 +3,7 @@ import sys
 import os
 import errno
 import getopt
-import json
+import signal
 from contextlib import closing
 
 import xapian as _x
@@ -11,7 +11,13 @@ import xapian as _x
 from bsdportsearch import DESCRIBE_POSITIONS, PORTS_DELIM, data2doc
 
 ############# CLI BOILERPLATE
-_PROG = 'routelog'
+_PROG = 'portindex'
+_VERBOSE = False
+
+def chirp(msg, f=sys.stderr):
+    if _VERBOSE:
+        shout(msg, f=f)
+
 def shout(msg, f=sys.stderr):
     '''Log to file (usually stderr), with progname: <log>'''
     print >> f, '{0}: {1}'.format(_PROG, msg)
@@ -25,7 +31,8 @@ class Fatal(Exception):
 class Usage(Exception):
     def __init__(self, asked_for=0):
         f = sys.stdout if asked_for else sys.stderr
-        shout('usage: {} [-h|--help] [-d db_name|--db-name=db_name]'\
+        shout('usage: {} [-h|--help] [-v|--verbose]'\
+              ' [-d db_name|--db-name=db_name]'\
               ' [ /path/to/ports [...]]'.format(os.path.basename(_PROG), f=f))
         self.exit = 0 if asked_for else 100
 
@@ -34,8 +41,7 @@ def exec_describe(ports_path, new_stdout):
     try:
         os.chdir(ports_path)
         os.dup2(new_stdout, 1)
-        #os.execvp('make', [ 'make', 'describe', ])
-        os.execvp('echo', [ 'echo', '''bash-4.2.37|/usr/ports/shells/bash|/usr/local|The GNU Project's Bourne Again SHell|./pkg-descr|obrien@FreeBSD.org|shells||||/usr/ports/converters/libiconv /usr/ports/devel/bison /usr/ports/devel/gettext|/usr/ports/converters/libiconv /usr/ports/devel/gettext|http://cnswww.cns.cwru.edu/~chet/bash/bashtop.html''', ])
+        os.execvp('make', [ 'make', 'describe', ])
     except (OSError, IOError, ), e:
         shout('{0}{1}{2}'.format(e.strerror,
                                  ': ' if e.filename is not None else '',
@@ -60,13 +66,16 @@ def describe2dict(desc):
 
 ############# INDEXER
 def main(args):
+    global _VERBOSE
     db_name, ports_paths = "INDEX.db", [ "/usr/ports/", ]
     try:
         # setup args and options
-        opts, args = getopt.getopt(args, 'hd:', ( 'help', 'db-name=', ))
+        opts, args = getopt.getopt(args, 'hvd:', ( 'help', 'verbose', 'db-name=', ))
         for flag, opt in opts:
             if flag in ( '-d', '--db-name', ):
                 db_name = opt
+            elif flag in ( '-v', '--verbose', ):
+                _VERBOSE = True
             elif flag in ( '-h', '--help', ):
                 raise Usage(1)
 
@@ -98,7 +107,15 @@ def main(args):
                                 continue
 
                             data = describe2dict(line)
+                            chirp('Indexing {} ...'.format(data['name']))
                             x_db.replace_document(*data2doc(data, x_db))
+                            chirp('Indexing {} ... done'.format(data['name']))
+                        chirp('I am done.')
+                    except:
+                        try:
+                            os.kill(pid, signal.SIGTERM)
+                        finally:
+                            raise
                     finally:
                         # papa-fork -- blocking wait on baby-fork
                         pid, rc = os.waitpid(pid, 0)
@@ -106,7 +123,11 @@ def main(args):
                         if 0 != rc:
                             return rc
                         if desc is not None:
-                            desc.close()
+                            try:
+                                desc.close()
+                            except (OSError, IOError,), e:
+                                if e.errno != errno.EBADF:
+                                    raise
                 finally:
                     try:
                         os.close(r_fd)
@@ -118,7 +139,8 @@ def main(args):
                             os.close(w_fd)
                         except (OSError, IOError,), e:
                             if e.errno != errno.EBADF:
-                                raise e
+                                raise
+                    pass
 
     except (OSError, IOError), e:
         shout('{0}{1}{2}'.format(e.strerror,

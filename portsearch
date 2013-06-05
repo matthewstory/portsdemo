@@ -11,7 +11,7 @@ import xapian as _x
 from bsdportsearch import query_parser
 
 ############# CLI BOILERPLATE
-_PROG = 'routelog'
+_PROG = 'portsearch'
 def shout(msg, f=sys.stderr):
     '''Log to file (usually stderr), with progname: <log>'''
     print >> f, '{0}: {1}'.format(_PROG, msg)

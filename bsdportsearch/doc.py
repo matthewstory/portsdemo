@@ -9,6 +9,9 @@ from . import ID, MAIN_INDEX, TERM_MAP, SKIP_THESE
 def data2doc(data, x_db):
     # make a new document
     x_doc = _x.Document()
+    data = data.copy()
+    for k,v in data.iteritems():
+        data[k] = unicode(v, encoding='ascii', errors='replace')
 
     # set string ID with Q prefix and data as JSON data
     x_id = 'Q{}'.format(data[ID])
