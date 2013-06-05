@@ -1,7 +1,7 @@
 The Demos
 ---------
 
-==== portindex
+### portindex
 
 To index your ports tree into a database in /usr/ports/INDEX.db, run:
 
