@@ -57,7 +57,18 @@ def main(args):
             enq = _x.Enquire(x_db)
             enq.set_query(x_query)
             for res in enq.get_mset(0, x_db.get_doccount(), None, None):
-                print res.document.get_data()
+                data = json.loads(res.document.get_data())
+                if short:
+                    print '{:<39} {:>40}'.format(data['name'][:38] + ":", data['desc'][:40].replace('\n', ' '))
+                else:
+                    print 'Name:   {name}\n'\
+                          'Path:   {path}\n'\
+                          'Maint:  {maintainer}\n'\
+                          'B-deps: {build-dep}\n'\
+                          'R-deps: {run-dep}'.format(**data)
+                    if data.get('site'):
+                        print 'WWW:    {}'.format(data['site'])
+                    print data['desc']
 
     except (OSError, IOError), e:
         shout('{0}{1}{2}'.format(e.strerror,

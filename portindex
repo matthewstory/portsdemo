@@ -41,11 +41,21 @@ def exec_describe(ports_path, new_stdout):
                                  ': ' if e.filename is not None else '',
                                  e.filename or ''))
 
+def _desc_from_file(desc_path):
+    '''Extract description from description file'''
+    with closing(open(desc_path, 'r')) as desc_file:
+        return desc_file.read()
+
 def describe2dict(desc):
     desc_dict = {}
     vals = desc.split(PORTS_DELIM)
     for ind in range(len(vals)):
-        desc_dict[DESCRIBE_POSITIONS[ind][0]] = vals[ind]
+        key = DESCRIBE_POSITIONS[ind][0]
+        if key == 'desc':
+            desc_dict[key] = _desc_from_file(vals[ind])
+        else:
+            desc_dict[key] = vals[ind]
+
     return desc_dict
 
 ############# INDEXER

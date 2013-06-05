@@ -6,11 +6,6 @@ import xapian as _x
 
 from . import ID, MAIN_INDEX, TERM_MAP, SKIP_THESE
 
-def _desc_from_file(desc_path):
-    '''Extract description from description file'''
-    with closing(open(desc_path, 'r')) as desc_file:
-        return desc_file.read()
-
 def data2doc(data, x_db):
     # make a new document
     x_doc = _x.Document()
@@ -31,11 +26,8 @@ def data2doc(data, x_db):
 
         indexer.set_stemming_strategy(_x.QueryParser.STEM_SOME)
         content = v
-        # contents of file at desc get indexed
-        if k == 'desc':
-            content = _desc_from_file(v)
         # basename and full path get indexed for path
-        elif k == 'path':
+        if k == 'path':
             content = '{} {}'.format(content, os.path.basename(content))
         # category doesn't get stemmed
         elif k == 'category':
