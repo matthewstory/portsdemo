@@ -1,0 +1,127 @@
+#!/usr/bin/env python
+import sys
+import os
+import errno
+import getopt
+import json
+from contextlib import closing
+
+import xapian as _x
+
+from bsdportsearch import DESCRIBE_POSITIONS, PORTS_DELIM, data2doc
+
+############# CLI BOILERPLATE
+_PROG = 'routelog'
+def shout(msg, f=sys.stderr):
+    '''Log to file (usually stderr), with progname: <log>'''
+    print >> f, '{0}: {1}'.format(_PROG, msg)
+
+class Fatal(Exception):
+    def __init__(self, msg, exit=111):
+        shout(msg)
+        self.message = msg
+        self.exit = exit
+
+class Usage(Exception):
+    def __init__(self, asked_for=0):
+        f = sys.stdout if asked_for else sys.stderr
+        shout('usage: {} [-h|--help] [-d db_name|--db-name=db_name]'\
+              ' [ /path/to/ports [...]]'.format(os.path.basename(_PROG), f=f))
+        self.exit = 0 if asked_for else 100
+
+def exec_describe(ports_path, new_stdout):
+    '''exec(2) make describe from ports path'''
+    try:
+        os.chdir(ports_path)
+        os.dup2(new_stdout, 1)
+        #os.execvp('make', [ 'make', 'describe', ])
+        os.execvp('echo', [ 'echo', '''bash-4.2.37|/usr/ports/shells/bash|/usr/local|The GNU Project's Bourne Again SHell|./pkg-descr|obrien@FreeBSD.org|shells||||/usr/ports/converters/libiconv /usr/ports/devel/bison /usr/ports/devel/gettext|/usr/ports/converters/libiconv /usr/ports/devel/gettext|http://cnswww.cns.cwru.edu/~chet/bash/bashtop.html''', ])
+    except (OSError, IOError, ), e:
+        shout('{0}{1}{2}'.format(e.strerror,
+                                 ': ' if e.filename is not None else '',
+                                 e.filename or ''))
+
+def describe2dict(desc):
+    desc_dict = {}
+    vals = desc.split(PORTS_DELIM)
+    for ind in range(len(vals)):
+        desc_dict[DESCRIBE_POSITIONS[ind][0]] = vals[ind]
+    return desc_dict
+
+############# INDEXER
+def main(args):
+    db_name, ports_paths = "INDEX.db", [ "/usr/ports/", ]
+    try:
+        # setup args and options
+        opts, args = getopt.getopt(args, 'hd:', ( 'help', 'db-name=', ))
+        for flag, opt in opts:
+            if flag in ( '-d', '--db-name', ):
+                db_name = opt
+            elif flag in ( '-h', '--help', ):
+                raise Usage(1)
+
+        if 0 < len(args):
+            ports_paths = args
+
+        # iterate over all ports paths and exec make describe on
+        for ports_path in ports_paths:
+            with closing(_x.WritableDatabase(os.path.join(ports_path, db_name),
+                                             _x.DB_CREATE_OR_OPEN)) as x_db:
+                r_fd, w_fd = os.pipe()
+                try:
+                    pid = os.fork()
+                    if 0 == pid:
+                        # run make describe from ports path in child fork
+                        os.close(r_fd)
+                        exec_describe(ports_path, w_fd)
+                        ### ONLY REACHED IN ERROR
+                        os._exit(111)
+
+                    # parent fork
+                    desc = None
+                    try:
+                        os.close(w_fd)
+                        desc = os.fdopen(r_fd, 'r')
+                        for line in desc:
+                            # for make describe of a subdir
+                            if line.startswith('===> '):
+                                continue
+
+                            data = describe2dict(line)
+                            x_db.replace_document(*data2doc(data, x_db))
+                    finally:
+                        # papa-fork -- blocking wait on baby-fork
+                        pid, rc = os.waitpid(pid, 0)
+                        # exit on non-0 rc or signal from child
+                        if 0 != rc:
+                            return rc
+                        if desc is not None:
+                            desc.close()
+                finally:
+                    try:
+                        os.close(r_fd)
+                    except (OSError, IOError,), e:
+                        if e.errno != errno.EBADF:
+                            raise e
+                    finally:
+                        try:
+                            os.close(w_fd)
+                        except (OSError, IOError,), e:
+                            if e.errno != errno.EBADF:
+                                raise e
+
+    except (OSError, IOError), e:
+        shout('{0}{1}{2}'.format(e.strerror,
+                                 ': ' if e.filename is not None else '',
+                                 e.filename or ''))
+        return 111
+    except getopt.GetoptError, e:
+        shout('invalid flag: -{0}{1}'.format('-' if 1 < len(e.opt) else '',
+              e.opt))
+        return 100
+    except (Fatal, Usage), e:
+        return e.exit
+
+if __name__ == '__main__':
+    _PROG = sys.argv[0]
+    sys.exit(main(sys.argv[1:]))

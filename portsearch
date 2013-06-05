@@ -1,0 +1,75 @@
+#!/usr/bin/env python
+import sys
+import os
+import errno
+import getopt
+import json
+from contextlib import closing
+
+import xapian as _x
+
+from bsdportsearch import query_parser
+
+############# CLI BOILERPLATE
+_PROG = 'routelog'
+def shout(msg, f=sys.stderr):
+    '''Log to file (usually stderr), with progname: <log>'''
+    print >> f, '{0}: {1}'.format(_PROG, msg)
+
+class Fatal(Exception):
+    def __init__(self, msg, exit=111):
+        shout(msg)
+        self.message = msg
+        self.exit = exit
+
+class Usage(Exception):
+    def __init__(self, asked_for=0):
+        f = sys.stdout if asked_for else sys.stderr
+        shout('usage: {} [-h|--help] [-l|--long]'\
+              ' [-p /path/to/ports|--ports=/path/to/ports]'\
+              ' [-d db_name|--db-name=db_name]'\
+              ' query [...]'.format(os.path.basename(_PROG), f=f))
+        self.exit = 0 if asked_for else 100
+
+############# SEARCHER
+def main(args):
+    short, db_name, ports_paths = True, "INDEX.db", []
+    try:
+        # setup args and options
+        opts, args = getopt.getopt(args, 'hld:p:', ( 'help', 'long',
+                                                     'db-name=', 'ports=', ))
+        for flag, opt in opts:
+            if flag in ( '-d', '--db-name', ):
+                db_name = opt
+            elif flag in ( '-l', '--long', ):
+                short = False
+            elif flag in ( '-p', '--ports', ):
+                ports_paths.append(opt)
+            elif flag in ( '-h', '--help', ):
+                raise Usage(1)
+
+        if 0 == len(ports_paths):
+            ports_paths = [ "/usr/ports/", ]
+
+        # with read db you can open many at a time
+        with closing(_x.Database(*[os.path.join(pp, db_name) for pp in ports_paths])) as x_db:
+            x_query = query_parser(x_db).parse_query(" ".join(args))
+            enq = _x.Enquire(x_db)
+            enq.set_query(x_query)
+            for res in enq.get_mset(0, x_db.get_doccount(), None, None):
+                print res.document.get_data()
+
+    except (OSError, IOError), e:
+        shout('{0}{1}{2}'.format(e.strerror,
+                                 ': ' if e.filename is not None else '',
+                                 e.filename or ''))
+        return 111
+    except getopt.GetoptError, e:
+        shout('invalid flag: -{0}{1}'.format('-' if 1 < len(e.opt) else '',
+              e.opt))
+        return 100
+    except (Fatal, Usage), e:
+        return e.exit
+if __name__ == '__main__':
+    _PROG = sys.argv[0]
+    sys.exit(main(sys.argv[1:]))
